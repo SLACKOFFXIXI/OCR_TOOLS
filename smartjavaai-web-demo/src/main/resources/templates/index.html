@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartJavaAI OCR · 在线文字识别工具</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #13131a;
+            --bg-card: #1a1a24;
+            --border: #2a2a3a;
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0b0;
+            --text-muted: #6b6b80;
+            --accent: #6366f1;
+            --accent-hover: #5558e3;
+            --success: #10b981;
+            --error: #ef4444;
+            --warning: #f59e0b;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+
+        .header {
+            padding: 24px 32px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            backdrop-filter: blur(10px);
+            background: rgba(10, 10, 15, 0.8);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+        }
+
+        .status-dot.warning { background: var(--warning); box-shadow: 0 0 8px var(--warning); }
+        .status-dot.error { background: var(--error); box-shadow: 0 0 8px var(--error); }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 48px 32px;
+        }
+
+        .hero {
+            text-align: center;
+            margin-bottom: 48px;
+        }
+
+        .hero h1 {
+            font-size: 42px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, #fff 0%, #a0a0b0 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero p {
+            font-size: 18px;
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 4px;
+            padding: 4px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            max-width: 720px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 10px 16px;
+            text-align: center;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            color: var(--text-secondary);
+            transition: all 0.2s;
+        }
+
+        .tab:hover { color: var(--text-primary); }
+        .tab.active {
+            background: var(--accent);
+            color: white;
+            font-weight: 500;
+        }
+
+        .workspace {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+
+        @media (max-width: 768px) {
+            .workspace { grid-template-columns: 1fr; }
+            .hero h1 { font-size: 32px; }
+        }
+
+        .panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px;
+            min-height: 480px;
+            max-height: calc(100vh - 160px);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .panel-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .upload-zone {
+            flex: 1;
+            border: 2px dashed var(--border);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: var(--bg-secondary);
+            text-align: center;
+            padding: 32px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: var(--accent);
+            background: rgba(99, 102, 241, 0.05);
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+            opacity: 0.6;
+        }
+
+        .upload-text {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .upload-hint {
+            color: var(--text-muted);
+            font-size: 12px;
+            margin-top: 8px;
+        }
+
+        #preview {
+            max-width: 100%;
+            max-height: 320px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .result-zone {
+            flex: 1;
+            min-height: 0;  /* 关键：让 flex 子元素可滚动 */
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 20px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace;
+            font-size: 14px;
+            line-height: 1.8;
+            white-space: pre-wrap;
+            word-break: break-all;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border) transparent;
+        }
+
+        /* 自定义滚动条样式（Webkit） */
+        .result-zone::-webkit-scrollbar {
+            width: 6px;
+        }
+        .result-zone::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .result-zone::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+        .result-zone::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+
+        .result-zone.empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            font-family: inherit;
+        }
+
+        .actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .group-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        .group-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        .group-title {
+            font-weight: 600;
+            color: var(--accent);
+        }
+        .group-reason {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .group-images {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 12px;
+        }
+        .group-image {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px;
+            text-align: center;
+        }
+        .group-image img {
+            max-width: 100%;
+            max-height: 140px;
+            border-radius: 4px;
+        }
+        .group-image .img-name {
+            margin-top: 6px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            word-break: break-all;
+        }
+        .group-image .img-meta {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        .file-list {
+            margin-top: 10px;
+            max-height: 120px;
+            overflow-y: auto;
+            padding: 8px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .file-list .file-item {
+            padding: 2px 0;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn:hover { background: var(--border); }
+        .btn-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-block { flex: 1; justify-content: center; }
+
+        .meta {
+            display: flex;
+            gap: 16px;
+            margin-top: 12px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .meta-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .field-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border);
+            font-family: inherit;
+            font-size: 14px;
+        }
+
+        .field-row:last-child { border-bottom: none; }
+        .field-key { color: var(--text-muted); }
+        .field-value { color: var(--text-primary); font-weight: 500; }
+
+        .toast {
+            position: fixed;
+            top: 80px;
+            right: 32px;
+            padding: 12px 20px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            z-index: 1000;
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.3s;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .toast.success { border-color: var(--success); }
+        .toast.error { border-color: var(--error); }
+
+        .alert {
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            font-size: 13px;
+            border: 1px solid;
+        }
+        .alert-success {
+            background: rgba(16, 185, 129, 0.1);
+            border-color: var(--success);
+            color: var(--success);
+        }
+        .alert-warning {
+            background: rgba(245, 158, 11, 0.1);
+            border-color: var(--warning);
+            color: var(--warning);
+        }
+
+        .loader {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: var(--text-secondary);
+            gap: 8px;
+        }
+
+        .loader.show { display: flex; }
+
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .footer {
+            text-align: center;
+            padding: 32px;
+            color: var(--text-muted);
+            font-size: 12px;
+            border-top: 1px solid var(--border);
+            margin-top: 64px;
+        }
+
+        .footer a { color: var(--text-secondary); text-decoration: none; }
+        .footer a:hover { color: var(--accent); }
+    </style>
+</head>
+<body>
+
+<header class="header">
+    <div class="logo">
+        <div class="logo-icon">🔍</div>
+        <span>SmartJavaAI OCR</span>
+    </div>
+    <div class="status-badge">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">检测中...</span>
+    </div>
+</header>
+
+<div class="container">
+
+    <section class="hero">
+        <h1>智能文字识别 · 在线工具</h1>
+        <p>基于 PaddleOCR 的纯本地推理，识别结果不离开你的设备。支持通用文字、身份证、车牌识别。</p>
+    </section>
+
+    <div class="tabs">
+        <div class="tab active" data-tool="recognize">📝 通用文字</div>
+        <div class="tab" data-tool="positions">📍 文字+位置</div>
+        <div class="tab" data-tool="idcard">🆔 身份证</div>
+        <div class="tab" data-tool="plate">🚗 车牌</div>
+        <div class="tab" data-tool="dedup">🔍 查重/PS检测</div>
+    </div>
+
+    <div class="workspace">
+
+        <div class="panel">
+            <div class="panel-title">
+                <span>📷 上传图片</span>
+                <span id="fileInfo" style="color: var(--text-muted); font-weight: normal;"></span>
+            </div>
+
+            <div class="upload-zone" id="uploadZone">
+                <div class="upload-icon">⬆️</div>
+                <div class="upload-text">点击或拖拽图片到这里</div>
+                <div class="upload-hint">支持 JPG / PNG / WebP，最大 10MB</div>
+                <img id="preview" alt="预览">
+                <div class="file-list" id="fileList" style="display:none;"></div>
+            </div>
+
+            <div class="actions">
+                <button class="btn btn-primary btn-block" id="recognizeBtn" disabled>
+                    <span id="recognizeBtnText">开始识别</span>
+                </button>
+                <button class="btn" id="clearBtn" style="display:none;">清空</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">
+                <span>📄 识别结果</span>
+                <span id="elapsed" style="color: var(--text-muted); font-weight: normal;"></span>
+            </div>
+
+            <div class="loader" id="loader">
+                <div class="spinner"></div>
+                <span>AI 正在识别...</span>
+            </div>
+
+            <div class="result-zone empty" id="result">
+                等待识别...
+            </div>
+
+            <div class="actions" id="resultActions" style="display:none;">
+                <button class="btn" id="copyBtn">📋 复制</button>
+                <button class="btn" id="downloadBtn">💾 下载</button>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<footer class="footer">
+    <p>
+        🔒 完全本地运行 · 数据不上传 · 基于
+        <a href="https://gitee.com/dengwenjie/SmartJavaAI" target="_blank">SmartJavaAI</a> ·
+        Powered by PaddleOCR
+    </p>
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<script>
+    // ============ 状态管理 ============
+    const state = {
+        currentTool: 'recognize',
+        currentFile: null,
+        currentFiles: [],
+        currentResult: null,
+        smartJavaAiAvailable: false
+    };
+
+    // ============ DOM 引用 ============
+    const uploadZone = document.getElementById('uploadZone');
+    const preview = document.getElementById('preview');
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.style.display = 'none';
+    document.body.appendChild(fileInput);
+
+    const recognizeBtn = document.getElementById('recognizeBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const resultEl = document.getElementById('result');
+    const loader = document.getElementById('loader');
+    const resultActions = document.getElementById('resultActions');
+    const elapsedEl = document.getElementById('elapsed');
+    const fileInfo = document.getElementById('fileInfo');
+    const toast = document.getElementById('toast');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+
+    // ============ 初始化健康检查 ============
+    async function checkHealth() {
+        try {
+            const r = await fetch('/api/health');
+            const data = await r.json();
+            state.smartJavaAiAvailable = data.smartjavaai_available;
+            if (data.smartjavaai_available) {
+                statusText.textContent = 'OCR 引擎就绪';
+                statusDot.className = 'status-dot';
+            } else {
+                statusText.textContent = 'OCR 占位模式';
+                statusDot.className = 'status-dot warning';
+            }
+        } catch (e) {
+            statusText.textContent = '服务异常';
+            statusDot.className = 'status-dot error';
+        }
+    }
+
+    // ============ Tab 切换 ============
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            state.currentTool = tab.dataset.tool;
+            // 切到查重 tab 时特殊处理
+            if (state.currentTool === 'dedup') {
+                document.querySelector('.upload-zone .upload-text').textContent = '点击或拖拽多张图片';
+                document.querySelector('.upload-zone .upload-hint').textContent = '支持多选，自动找出重复/PS篡改';
+                state.currentFiles = [];
+                renderFileList();
+                fileInput.multiple = true;
+                recognizeBtn.disabled = true;  // 等选了 >= 2 张图才能点
+                document.getElementById('recognizeBtnText').textContent = '开始检测';
+                clearBtn.style.display = 'none';
+                fileInfo.textContent = '';
+            } else {
+                document.querySelector('.upload-zone .upload-text').textContent = '点击或拖拽图片到这里';
+                document.querySelector('.upload-zone .upload-hint').textContent = '支持 JPG / PNG / WebP，最大 10MB';
+                state.currentFile = null;
+                state.currentFiles = [];
+                state.currentResult = null;
+                preview.style.display = 'none';
+                preview.src = '';
+                fileInput.value = '';
+                fileInput.multiple = false;
+                clearBtn.style.display = 'none';
+                fileInfo.textContent = '';
+                renderFileList();
+                recognizeBtn.disabled = true;  // 普通 tab 也是有图才能点
+                document.getElementById('recognizeBtnText').textContent = '开始识别';
+            }
+            if (state.currentResult) showEmpty();
+        });
+    });
+
+    // ============ 上传处理 ============
+    uploadZone.addEventListener('click', () => fileInput.click());
+    uploadZone.addEventListener('dragover', e => {
+        e.preventDefault();
+        uploadZone.classList.add('dragover');
+    });
+    uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+    uploadZone.addEventListener('drop', e => {
+        e.preventDefault();
+        uploadZone.classList.remove('dragover');
+        if (e.dataTransfer.files.length) {
+            if (state.currentTool === 'dedup') {
+                for (const f of e.dataTransfer.files) handleDedupFile(f);
+            } else {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        }
+    });
+    fileInput.addEventListener('change', e => {
+        if (state.currentTool === 'dedup') {
+            for (const f of e.target.files) handleDedupFile(f);
+        } else if (e.target.files.length) {
+            handleFile(e.target.files[0]);
+        }
+    });
+
+    function handleFile(file) {
+        if (!file.type.startsWith('image/')) {
+            showToast('请选择图片文件', 'error');
+            return;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+            showToast('文件不能超过 10MB', 'error');
+            return;
+        }
+        state.currentFile = file;
+
+        // 预览
+        const reader = new FileReader();
+        reader.onload = e => {
+            preview.src = e.target.result;
+            preview.style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+
+        // UI 更新
+        recognizeBtn.disabled = false;
+        clearBtn.style.display = 'inline-flex';
+        fileInfo.textContent = `${file.name} · ${(file.size / 1024).toFixed(1)} KB`;
+    }
+
+    clearBtn.addEventListener('click', () => {
+        state.currentFile = null;
+        state.currentResult = null;
+        preview.style.display = 'none';
+        preview.src = '';
+        fileInput.value = '';
+        recognizeBtn.disabled = true;
+        clearBtn.style.display = 'none';
+        fileInfo.textContent = '';
+        showEmpty();
+    });
+
+    // ============ 识别 ============
+    recognizeBtn.addEventListener('click', recognize);
+
+    async function recognize() {
+        // 查重 tab 走独立逻辑（必须在 currentFile 检查之前！）
+        if (state.currentTool === 'dedup') {
+            return dedupDetect();
+        }
+
+        if (!state.currentFile) return;
+
+        // UI: loading
+        recognizeBtn.disabled = true;
+        loader.classList.add('show');
+        resultEl.classList.add('empty');
+        resultEl.textContent = 'AI 正在识别...';
+        resultActions.style.display = 'none';
+        elapsedEl.textContent = '';
+
+        const endpoint = {
+            'recognize': '/api/ocr/recognize',
+            'positions': '/api/ocr/positions',
+            'idcard': '/api/ocr/idcard',
+            'plate': '/api/ocr/plate'
+        }[state.currentTool];
+
+        const formData = new FormData();
+        formData.append('file', state.currentFile);
+        if (state.currentTool === 'idcard') {
+            formData.append('side', 'front');
+        }
+
+        const start = Date.now();
+        try {
+            const r = await fetch(endpoint, { method: 'POST', body: formData });
+            const data = await r.json();
+            const elapsed = Date.now() - start;
+
+            if (!data.success) {
+                throw new Error(data.error || '识别失败');
+            }
+
+            state.currentResult = data;
+            renderResult(data, state.currentTool);
+            elapsedEl.textContent = `⏱ ${elapsed}ms · ${data.image_size}`;
+        } catch (e) {
+            resultEl.classList.remove('empty');
+            resultEl.textContent = `❌ 错误: ${e.message}`;
+            showToast('识别失败: ' + e.message, 'error');
+        } finally {
+            loader.classList.remove('show');
+            recognizeBtn.disabled = false;
+        }
+    }
+
+    function renderResult(data, tool) {
+        resultEl.classList.remove('empty');
+        resultActions.style.display = 'flex';
+
+        if (tool === 'idcard') {
+            // 结构化字段
+            const fields = data.fields || {};
+            const fieldLabels = {
+                name: '姓名', gender: '性别', ethnicity: '民族',
+                birthday: '出生日期', address: '地址',
+                id_number: '身份证号',
+                issuing_authority: '签发机关', valid_period: '有效期'
+            };
+            let html = '';
+            for (const [key, value] of Object.entries(fields)) {
+                if (value) {
+                    html += `<div class="field-row">
+                        <span class="field-key">${fieldLabels[key] || key}</span>
+                        <span class="field-value">${value}</span>
+                    </div>`;
+                }
+            }
+            if (html) {
+                resultEl.innerHTML = html;
+            } else {
+                resultEl.textContent = data.raw_text || '未识别到结构化字段';
+            }
+        } else if (tool === 'plate') {
+            if (data.detected === false) {
+                let html = `<div class="alert alert-warning">⚠️ ${data.message || '未识别到中国车牌'}</div>`;
+                if (data.candidates && data.candidates.length > 0) {
+                    html += `<div style="margin-top: 12px; color: var(--text-muted); font-size: 12px;">疑似车牌（不符合严格格式）：</div>`;
+                    data.candidates.forEach(c => {
+                        html += `<div class="field-row">
+                            <span class="field-key">候选</span>
+                            <span class="field-value">${escapeHtml(c)}</span>
+                        </div>`;
+                    });
+                }
+                if (data.raw_text) {
+                    html += `<div class="field-row">
+                        <span class="field-key">OCR 原文</span>
+                        <span class="field-value" style="font-family: monospace; font-size: 12px;">${escapeHtml(data.raw_text)}</span>
+                    </div>`;
+                }
+                resultEl.innerHTML = html;
+            } else {
+                const conf = data.confidence != null ? data.confidence : 1.0;
+                const confColor = conf >= 0.9 ? 'var(--success)' : conf >= 0.7 ? 'var(--accent)' : 'var(--warning)';
+                resultEl.innerHTML = `<div class="alert alert-success">✓ 已识别到车牌</div>
+                    <div class="field-row">
+                        <span class="field-key">车牌号</span>
+                        <span class="field-value" style="font-size: 28px; color: var(--accent); font-weight: 700; letter-spacing: 2px;">${escapeHtml(data.plate || '?')}</span>
+                    </div>
+                    <div class="field-row">
+                        <span class="field-key">置信度</span>
+                        <span class="field-value" style="color: ${confColor};">${(conf * 100).toFixed(1)}%</span>
+                    </div>`;
+            }
+        } else if (tool === 'positions') {
+            const items = data.items || [];
+            if (items.length === 0) {
+                resultEl.textContent = '未识别到文字';
+            } else {
+                let html = `<div style="margin-bottom: 12px; color: var(--text-muted);">共 ${items.length} 行：</div>`;
+                items.forEach((item, i) => {
+                    const bbox = item.bbox ? ` [${item.bbox.x1.toFixed(0)},${item.bbox.y1.toFixed(0)} - ${item.bbox.x2.toFixed(0)},${item.bbox.y2.toFixed(0)}]` : '';
+                    const score = item.score != null ? item.score : 1.0;
+                    const scoreColor = score >= 0.9 ? 'var(--success)' : score >= 0.7 ? 'var(--accent)' : 'var(--warning)';
+                    const warn = score < 0.7 ? ' ⚠️' : '';
+                    html += `<div class="field-row">
+                        <span class="field-key">#${i + 1}${bbox} <span style="color: ${scoreColor};">${(score*100).toFixed(0)}%</span>${warn}</span>
+                        <span class="field-value">${escapeHtml(item.text)}</span>
+                    </div>`;
+                });
+                resultEl.innerHTML = html;
+            }
+        } else {
+            // 通用
+            const conf = data.avg_confidence != null ? data.avg_confidence : 1.0;
+            const confColor = conf >= 0.9 ? 'var(--success)' : conf >= 0.7 ? 'var(--accent)' : 'var(--warning)';
+            const warn = conf < 0.7 ? ' ⚠️ 低置信度，请人工核对' : '';
+            let html = `<div style="margin-bottom: 8px; color: var(--text-muted); font-size: 12px;">
+                平均置信度: <span style="color: ${confColor};">${(conf*100).toFixed(1)}%</span>${warn}
+            </div>`;
+            html += `<div>${escapeHtml(data.text || '未识别到文字')}</div>`;
+            resultEl.innerHTML = html;
+        }
+    }
+
+    function showEmpty() {
+        resultEl.classList.add('empty');
+        resultEl.textContent = '等待识别...';
+        resultActions.style.display = 'none';
+        elapsedEl.textContent = '';
+    }
+
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    // ============ 复制/下载 ============
+    document.getElementById('copyBtn').addEventListener('click', () => {
+        if (!state.currentResult) return;
+        const text = state.currentTool === 'idcard'
+            ? JSON.stringify(state.currentResult.fields || {}, null, 2)
+            : state.currentResult.text || '';
+        navigator.clipboard.writeText(text).then(() => showToast('已复制到剪贴板', 'success'));
+    });
+
+    document.getElementById('downloadBtn').addEventListener('click', () => {
+        if (!state.currentResult) return;
+        const text = state.currentTool === 'idcard'
+            ? JSON.stringify(state.currentResult.fields || {}, null, 2)
+            : state.currentResult.text || '';
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ocr-result-${Date.now()}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+
+    // ============ Toast ============
+    function showToast(message, type = 'success') {
+        toast.textContent = message;
+        toast.className = `toast show ${type}`;
+        setTimeout(() => toast.classList.remove('show'), 3000);
+    }
+
+    // ============ 查重 / PS 检测 ============
+    const fileListEl = document.getElementById('fileList');
+
+    function handleDedupFile(file) {
+        if (!file.type.startsWith('image/')) {
+            showToast('请选择图片文件', 'error');
+            return;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+            showToast('文件不能超过 10MB', 'error');
+            return;
+        }
+        // 去重（同名不重复添加）
+        if (state.currentFiles.some(f => f.name === file.name && f.size === file.size)) {
+            return;
+        }
+        state.currentFiles.push(file);
+        renderFileList();
+        recognizeBtn.disabled = state.currentFiles.length < 2;
+        clearBtn.style.display = 'inline-flex';
+        fileInfo.textContent = `已选 ${state.currentFiles.length} 张图片`;
+    }
+
+    function renderFileList() {
+        if (state.currentFiles.length === 0) {
+            fileListEl.style.display = 'none';
+            return;
+        }
+        fileListEl.style.display = 'block';
+        fileListEl.innerHTML = state.currentFiles.map((f, i) =>
+            `<div class="file-item"><span>${i + 1}. ${escapeHtml(f.name)}</span><span style="color: var(--text-muted);">${(f.size / 1024).toFixed(1)} KB</span></div>`
+        ).join('');
+    }
+
+    // 查重功能由 recognize() 函数内部直接路由到 dedupDetect()
+
+    async function dedupDetect() {
+        if (state.currentFiles.length < 2) {
+            showToast('至少选择 2 张图片', 'error');
+            return;
+        }
+
+        recognizeBtn.disabled = true;
+        document.getElementById('recognizeBtnText').textContent = '检测中...';
+        loader.classList.add('show');
+        resultEl.classList.add('empty');
+        resultEl.textContent = '正在计算图像哈希并比对...';
+        resultActions.style.display = 'none';
+        elapsedEl.textContent = '';
+
+        const formData = new FormData();
+        state.currentFiles.forEach(f => formData.append('files', f));
+
+        const start = Date.now();
+        try {
+            const r = await fetch('/api/dedup', { method: 'POST', body: formData });
+            const data = await r.json();
+            const elapsed = Date.now() - start;
+
+            if (!data.success) {
+                throw new Error(data.error || '查重失败');
+            }
+            state.currentResult = data;
+            renderDedupResult(data);
+            elapsedEl.textContent = `⏱ ${elapsed}ms · ${data.total_files} 张图，${data.group_count} 组重复`;
+        } catch (e) {
+            log.error('查重失败', e);
+            resultEl.classList.remove('empty');
+            resultEl.textContent = `❌ 错误: ${e.message}`;
+            showToast('查重失败: ' + e.message, 'error');
+        } finally {
+            loader.classList.remove('show');
+            document.getElementById('recognizeBtnText').textContent = '开始检测';
+            recognizeBtn.disabled = state.currentFiles.length < 2;
+        }
+    }
+
+    function renderDedupResult(data) {
+        resultEl.classList.remove('empty');
+        resultActions.style.display = 'none';
+        resultEl.style.textAlign = 'left';
+        resultEl.style.fontFamily = 'inherit';
+        resultEl.style.whiteSpace = 'normal';
+
+        if (!data.groups || data.groups.length === 0) {
+            resultEl.innerHTML = `<div class="alert alert-success">✓ 检测完成</div>
+                <div style="margin-top: 16px; color: var(--text-secondary);">
+                    共 ${data.total_files} 张图片，<strong>未发现重复或 PS 篡改</strong>。
+                </div>`;
+            return;
+        }
+
+        let html = `<div class="alert alert-warning">⚠️ 发现 ${data.group_count} 组重复/疑似 PS 篡改（共 ${data.total_files} 张图）</div>`;
+
+        data.groups.forEach((g, idx) => {
+            const reasonColor = g.reason.includes('完全相同') ? 'var(--success)' :
+                                g.reason.includes('PS') ? 'var(--warning)' : 'var(--accent)';
+            html += `<div class="group-card">
+                <div class="group-header">
+                    <div>
+                        <span class="group-title">组 #${g.groupId}</span>
+                        <span style="margin-left: 12px; font-size: 12px; color: var(--text-muted);">${g.images.length} 张</span>
+                    </div>
+                    <div class="group-reason" style="color: ${reasonColor};">${escapeHtml(g.reason)}</div>
+                </div>
+                <div class="group-images">
+                    ${g.images.map(img => `
+                        <div class="group-image">
+                            <img src="${img.thumbnail}" alt="${escapeHtml(img.name)}">
+                            <div class="img-name">${escapeHtml(img.name)}</div>
+                            <div class="img-meta">${(img.size / 1024).toFixed(1)} KB</div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>`;
+        });
+
+        // 不重复的图：只显示文件名
+        const duplicatedNames = new Set();
+        data.groups.forEach(g => g.images.forEach(img => duplicatedNames.add(img.name)));
+        const allNames = state.currentFiles.map(f => f.name);
+        const uniqueNames = allNames.filter(n => !duplicatedNames.has(n));
+
+        if (uniqueNames.length > 0) {
+            html += `<div class="group-card" style="border-style: dashed;">
+                <div class="group-header">
+                    <div class="group-title" style="color: var(--text-muted);">未重复（${uniqueNames.length} 张）</div>
+                    <div class="group-reason">仅列出文件名供参考</div>
+                </div>
+                <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.8;">
+                    ${uniqueNames.map(n => `<div>• ${escapeHtml(n)}</div>`).join('')}
+                </div>
+            </div>`;
+        }
+
+        resultEl.innerHTML = html;
+    }
+
+    // ============ 启动 ============
+    checkHealth();
+</script>
+
+</body>
+</html>

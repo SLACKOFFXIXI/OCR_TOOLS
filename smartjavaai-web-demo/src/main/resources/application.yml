@@ -1,0 +1,31 @@
+server:
+  port: 8080
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+
+spring:
+  application:
+    name: smartjavaai-web-demo
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 12MB
+  thymeleaf:
+    cache: false  # 开发阶段禁用缓存
+
+# SmartJavaAI 模型配置（与 MCP Server 共享）
+smartjavaai:
+  model:
+    base-path: ./models/
+    det-model-name: ch_PP-OCRv5_server_det
+    rec-model-name: ch_PP-OCRv5_server_rec
+
+logging:
+  level:
+    root: INFO
+    cn.smartjavaai: INFO
+  file:
+    name: ${user.home}/.smartjavaai-web-demo/web-demo.log

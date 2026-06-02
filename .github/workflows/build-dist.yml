@@ -1,0 +1,309 @@
+name: Build Multi-Platform Distribution
+
+# 触发条件：推送 tag 或手动触发
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14  # Apple Silicon
+            platform: macos-arm64
+            java_os: mac
+          - os: windows-latest
+            platform: windows-x64
+            java_os: windows
+          - os: ubuntu-latest
+            platform: linux-x64
+            java_os: linux
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 20
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '20'
+
+      - name: Build common module
+        run: mvn -B clean install -DskipTests -pl common -am
+
+      - name: Build ocr module
+        run: mvn -B clean install -DskipTests -pl ocr -am
+
+      - name: Build web demo
+        run: cd smartjavaai-web-demo && mvn -B clean package -DskipTests
+
+      - name: Prepare distribution directory
+        shell: bash
+        run: |
+          # 创建自定义 JRE
+          jlink \
+            --add-modules ALL-MODULE-PATH \
+            --strip-debug \
+            --no-man-pages \
+            --no-header-files \
+            --output dist/runtime
+
+          # 复制 app jar
+          mkdir -p dist/app
+          cp smartjavaai-web-demo/target/smartjavaai-web-demo.jar dist/app/
+
+          # 复制模型
+          mkdir -p dist/models
+          cp -R smartjavaai-web-demo/models/* dist/models/
+
+          # 准备预置 native libs 目录（首次启动时会从这里复制到用户目录）
+          mkdir -p dist/natives
+
+      - name: Pre-load DJL native libs (first run needs this)
+        shell: bash
+        run: |
+          # 第一次启动会触发 DJL 下载 native lib
+          # 我们让它下载完成后，再把缓存预置到 dist/natives/
+          cd dist
+          mkdir -p logs
+          nohup ./runtime/bin/java \
+            -Xmx4g \
+            -Dloader.main=cn.smartjavaai.web.WebDemoApplication \
+            -Dai.djl.default_engine=OnnxRuntime \
+            -Dloader.path=./models \
+            -cp ./app/smartjavaai-web-demo.jar \
+            org.springframework.boot.loader.launch.PropertiesLauncher > logs/warmup.log 2>&1 &
+          WARMUP_PID=$!
+
+          # 触发模型加载（让 DJL 下载 native lib）
+          for i in {1..30}; do
+            sleep 3
+            if curl -s --max-time 5 http://localhost:8080/api/health > /dev/null 2>&1; then
+              echo "服务启动成功，触发 OCR 加载模型..."
+              # 调用 OCR 触发模型加载（这会触发 DJL 下载 native lib）
+              curl -s --max-time 60 -X POST \
+                -F "file=@../smartjavaai-web-demo/scripts/dummy.jpg" \
+                http://localhost:8080/api/ocr/recognize > /dev/null 2>&1 || true
+              sleep 5
+              break
+            fi
+          done
+
+          # 杀掉服务
+          kill $WARMUP_PID 2>/dev/null || true
+          sleep 2
+          kill -9 $WARMUP_PID 2>/dev/null || true
+
+          # 复制用户缓存到 dist/natives
+          if [ -d "$HOME/smartjavaai_cache" ]; then
+            echo "预置 smartjavaai_cache 到 dist/natives/"
+            cp -R "$HOME/smartjavaai_cache" dist/natives/
+            du -sh dist/natives
+          else
+            echo "⚠ 未找到 smartjavaai_cache，dist/natives 仍为空"
+          fi
+
+      - name: Adjust paths for current platform
+        shell: bash
+        run: |
+          # GitHub Actions 上 Mac runner 缓存路径是 ~/smartjavaai_cache
+          # Windows runner 是 %USERPROFILE%/smartjavaai_cache
+          # Linux runner 是 ~/smartjavaai_cache
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            echo "Windows runner - 调整路径"
+            # Windows 上 jlink 输出已经包含 bin/java.exe
+            ls dist/runtime/bin/ | head -5
+          else
+            ls dist/runtime/bin/ | head -5
+          fi
+
+      - name: Create start scripts
+        shell: bash
+        run: |
+          # macOS / Linux
+          cat > dist/start.sh << 'EOF'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          RUNTIME="$DIR/runtime"
+          APP_JAR="$DIR/app/smartjavaai-web-demo.jar"
+          LOG_DIR="$DIR/logs"
+
+          JAVA_OPTS="-Xmx4g -Dfile.encoding=UTF-8"
+
+          # 预置 DJL native libs（首次启动跳过联网下载）
+          SMARTJAVAAI_CACHE="$HOME/smartjavaai_cache"
+          if [ ! -d "$SMARTJAVAAI_CACHE/pytorch" ] && [ -d "$DIR/natives" ]; then
+              echo "🛰  首次启动: 预置 DJL native libs 到 $SMARTJAVAAI_CACHE"
+              mkdir -p "$SMARTJAVAAI_CACHE"
+              cp -R "$DIR/natives"/* "$SMARTJAVAAI_CACHE/" && \
+                  echo "✓ Native libs 预置完成" || \
+                  echo "⚠ 预置失败（首次启动可能需要联网）"
+          fi
+
+          echo "========================================"
+          echo "  SmartJavaAI OCR & 查重 工具"
+          echo "  启动中..."
+          echo "========================================"
+          echo ""
+          echo "  📁 模型目录: $DIR/models"
+          echo "  📝 日志: $LOG_DIR/run.log"
+          echo "  🌐 访问: http://localhost:8080"
+          echo ""
+          echo "  按 Ctrl+C 停止服务"
+          echo ""
+
+          mkdir -p "$LOG_DIR"
+          "$RUNTIME/bin/java" $JAVA_OPTS \
+              -Dloader.main=cn.smartjavaai.web.WebDemoApplication \
+              -Dai.djl.default_engine=OnnxRuntime \
+              -Dloader.path="$DIR/models" \
+              -cp "$APP_JAR" \
+              org.springframework.boot.loader.launch.PropertiesLauncher
+          EOF
+          chmod +x dist/start.sh
+
+          # Windows
+          cat > dist/start.bat << 'EOF'
+          @echo off
+          chcp 65001 >nul
+
+          set DIR=%~dp0
+          set RUNTIME="%DIR%runtime"
+          set APP_JAR="%DIR%app\smartjavaai-web-demo.jar"
+          set LOG_DIR="%DIR%logs"
+
+          set JAVA_OPTS=-Xmx4g -Dfile.encoding=UTF-8
+
+          REM 预置 DJL native libs
+          set SMARTJAVAAI_CACHE=%USERPROFILE%\smartjavaai_cache
+          if not exist "%SMARTJAVAAI_CACHE%\pytorch" (
+              if exist "%DIR%natives" (
+                  echo 预置 DJL native libs 到 %SMARTJAVAAI_CACHE%...
+                  if not exist "%SMARTJAVAAI_CACHE%" mkdir "%SMARTJAVAAI_CACHE%"
+                  xcopy /E /I /Y "%DIR%natives" "%SMARTJAVAAI_CACHE%"
+                  echo Native libs 预置完成
+              )
+          )
+
+          echo ========================================
+          echo   SmartJavaAI OCR ^ 查重 工具
+          echo   启动中...
+          echo ========================================
+          echo.
+          echo   模型目录: %DIR%models
+          echo   日志: %LOG_DIR%\run.log
+          echo   访问: http://localhost:8080
+          echo.
+          echo   按 Ctrl+C 停止服务
+          echo.
+
+          if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
+          %RUNTIME%\bin\java.exe %JAVA_OPTS% ^
+              -Dloader.main=cn.smartjavaai.web.WebDemoApplication ^
+              -Dai.djl.default_engine=OnnxRuntime ^
+              -Dloader.path="%DIR%models" ^
+              -cp "%APP_JAR%" ^
+              org.springframework.boot.loader.launch.PropertiesLauncher
+
+          pause
+          EOF
+
+      - name: Create README
+        shell: bash
+        run: |
+          cat > dist/README.txt << 'EOF'
+          ═══════════════════════════════════════════════════════
+            SmartJavaAI OCR & 查重工具  v0.2.0
+            平台: ${{ matrix.platform }}
+          ═══════════════════════════════════════════════════════
+
+          🚀 启动方法：
+            Windows:   双击 start.bat
+            Mac/Linux: 双击 start.sh，或在终端执行 ./start.sh
+
+          🌐 启动后访问：
+            http://localhost:8080
+
+          📋 系统要求：
+            - ${{ matrix.os == 'windows-latest' && 'Windows 10/11 64位' || (matrix.os == 'macos-14' && 'macOS 12+ Apple Silicon (M1/M2/M3)' || 'Linux x86_64') }}
+            - 无需预装 Java！JRE 已内置
+            - 至少 4GB 内存
+            - 无需联网（native libs 已预置）
+
+          💡 功能：
+            - 通用 OCR 文字识别（中文/英文/数字）
+            - 文字位置识别（带置信度）
+            - 身份证识别（含字段校验）
+            - 车牌识别（带正则校验）
+            - 图片查重 / PS 检测（aHash + pHash 算法）
+
+          📁 目录结构：
+            runtime/      自定义 JRE（无需安装 Java）
+            app/         主程序 jar
+            models/      PaddleOCR 模型文件
+            natives/     预置的 native libs（首次启动跳过下载）
+            logs/        运行日志
+            start.bat    Windows 启动脚本
+            start.sh     Mac/Linux 启动脚本
+
+          ❓ 故障排查：
+            1. 端口 8080 被占用 → 编辑 start.sh/bat，修改 8080 为其他端口
+            2. 模型加载失败 → 检查 models/ 目录是否完整
+            3. 其他问题 → 查看 logs/run.log
+          EOF
+
+      - name: Clean up build artifacts
+        shell: bash
+        run: |
+          # 清理临时日志
+          rm -rf dist/logs
+          rm -rf smartjavaai-web-demo/target
+          rm -rf common/target ocr/target
+          echo "清理完成"
+
+      - name: Package as zip
+        shell: bash
+        run: |
+          cd dist
+          zip -qr ../SmartJavaAI-WebDemo-v${{ github.ref_name || '0.2' }}-${{ matrix.platform }}.zip .
+          cd ..
+          ls -lh *.zip
+          du -sh dist
+
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartJavaAI-WebDemo-${{ matrix.platform }}
+          path: SmartJavaAI-WebDemo-*.zip
+          retention-days: 30
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: ls -lh artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false
