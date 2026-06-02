@@ -6,3 +6,6 @@ log
 /.settings/
 /logging.file_IS_UNDEFINED/
 
+
+# Exclude SmartJavaAI lib/ dependencies
+smartjavaai-web-demo/lib/
