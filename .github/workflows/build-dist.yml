@@ -62,13 +62,16 @@ jobs:
           # 准备预置 native libs 目录（首次启动时会从这里复制到用户目录）
           mkdir -p dist/natives
 
-      - name: Pre-load DJL native libs (first run needs this)
+      - name: Pre-load DJL native libs (optional, skip on failure)
         shell: bash
+        continue-on-error: true   # 即使失败也继续 - 用户首次启动时会在线下载
         run: |
           # 第一次启动会触发 DJL 下载 native lib
-          # 我们让它下载完成后，再把缓存预置到 dist/natives/
+          # 这个步骤是"可选的"——预下载成功就预置，失败就让用户首次启动时在线下
           cd dist
           mkdir -p logs
+
+          # 启动 demo（后台）
           nohup ./runtime/bin/java \
             -Xmx4g \
             -Dloader.main=cn.smartjavaai.web.WebDemoApplication \
@@ -78,32 +81,35 @@ jobs:
             org.springframework.boot.loader.launch.PropertiesLauncher > logs/warmup.log 2>&1 &
           WARMUP_PID=$!
 
-          # 触发模型加载（让 DJL 下载 native lib）
+          # 等启动 + 触发 OCR 下载 native lib（最多 90 秒）
+          SUCCESS=false
           for i in {1..30}; do
             sleep 3
             if curl -s --max-time 5 http://localhost:8080/api/health > /dev/null 2>&1; then
-              echo "服务启动成功，触发 OCR 加载模型..."
-              # 调用 OCR 触发模型加载（这会触发 DJL 下载 native lib）
+              echo "服务启动，触发 OCR 加载模型（让 DJL 下载 native lib）..."
+              # 用 1x1 PNG 触发 OCR
+              echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 -d > /tmp/warmup.png
               curl -s --max-time 60 -X POST \
-                -F "file=@../smartjavaai-web-demo/scripts/dummy.jpg" \
+                -F "file=@/tmp/warmup.png" \
                 http://localhost:8080/api/ocr/recognize > /dev/null 2>&1 || true
               sleep 5
+              SUCCESS=true
               break
             fi
           done
 
-          # 杀掉服务
+          # 杀服务
           kill $WARMUP_PID 2>/dev/null || true
           sleep 2
           kill -9 $WARMUP_PID 2>/dev/null || true
 
-          # 复制用户缓存到 dist/natives
-          if [ -d "$HOME/smartjavaai_cache" ]; then
-            echo "预置 smartjavaai_cache 到 dist/natives/"
-            cp -R "$HOME/smartjavaai_cache" dist/natives/
+          if [ "$SUCCESS" = true ] && [ -d "$HOME/smartjavaai_cache" ]; then
+            echo "✓ 预置 smartjavaai_cache 到 dist/natives/"
+            mkdir -p dist/natives
+            cp -R "$HOME/smartjavaai_cache"/* dist/natives/
             du -sh dist/natives
           else
-            echo "⚠ 未找到 smartjavaai_cache，dist/natives 仍为空"
+            echo "⚠ 未下载到 native lib（dist/natives 留空，用户首次启动需联网）"
           fi
 
       - name: Adjust paths for current platform
