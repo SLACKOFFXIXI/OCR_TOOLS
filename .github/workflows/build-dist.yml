@@ -8,23 +8,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Build on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-14  # Apple Silicon
-            platform: macos-arm64
-            java_os: mac
-          - os: windows-latest
-            platform: windows-x64
-            java_os: windows
-          - os: ubuntu-latest
-            platform: linux-x64
-            java_os: linux
-
+  # 第一阶段：在 Mac 上构建 jar（DJL 全平台通用 jar）
+  build-jar:
+    name: Build JAR (macOS-14)
+    runs-on: macos-14
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -36,10 +23,47 @@ jobs:
           java-version: '20'
 
       - name: Build web demo
-        # 直接在 web-demo 目录构建，cn.smartjavaai:ocr/common:1.1.2
-        # 从 Maven Central 拉取，无需编译父项目
-        # -e 显示完整错误堆栈（诊断 Windows 失败用）
-        run: cd smartjavaai-web-demo && mvn -B clean package -DskipTests -Dgpg.skip=true -e 2>&1 | tee build.log; [ ${PIPESTATUS[0]} -eq 0 ] || (echo "===== BUILD LOG TAIL =====" && tail -100 build.log && exit 1)
+        # 在 Mac 上 mvn package（已验证 Mac 跑通），生成跨平台 jar
+        run: cd smartjavaai-web-demo && mvn -B clean package -DskipTests -Dgpg.skip=true
+
+      - name: Upload JAR for other platforms to use
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartjavaai-web-demo-jar
+          path: smartjavaai-web-demo/target/smartjavaai-web-demo.jar
+          retention-days: 1
+
+  # 第二阶段：3 平台各自用预编译的 jar 做分发包
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    needs: build-jar
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: macos-arm64
+          - os: windows-latest
+            platform: windows-x64
+          - os: ubuntu-latest
+            platform: linux-x64
+
+    steps:
+      - name: Checkout code (for scripts and workflow files)
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 20
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '20'
+
+      - name: Download prebuilt JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: smartjavaai-web-demo-jar
+          path: dist/app
 
       - name: Prepare distribution directory
         shell: bash
@@ -52,23 +76,14 @@ jobs:
             --no-header-files \
             --output dist/runtime
 
-          # 复制 app jar
-          mkdir -p dist/app
-          cp smartjavaai-web-demo/target/smartjavaai-web-demo.jar dist/app/
-
           # 复制模型
           mkdir -p dist/models
           cp -R smartjavaai-web-demo/models/* dist/models/
 
-          # 准备预置 native libs 目录（首次启动时会从这里复制到用户目录）
-          mkdir -p dist/natives
-
       - name: Pre-load DJL native libs (optional, skip on failure)
         shell: bash
-        continue-on-error: true   # 即使失败也继续 - 用户首次启动时会在线下载
+        continue-on-error: true
         run: |
-          # 第一次启动会触发 DJL 下载 native lib
-          # 这个步骤是"可选的"——预下载成功就预置，失败就让用户首次启动时在线下
           cd dist
           mkdir -p logs
 
@@ -82,13 +97,12 @@ jobs:
             org.springframework.boot.loader.launch.PropertiesLauncher > logs/warmup.log 2>&1 &
           WARMUP_PID=$!
 
-          # 等启动 + 触发 OCR 下载 native lib（最多 90 秒）
+          # 等启动 + 触发 OCR
           SUCCESS=false
           for i in {1..30}; do
             sleep 3
             if curl -s --max-time 5 http://localhost:8080/api/health > /dev/null 2>&1; then
-              echo "服务启动，触发 OCR 加载模型（让 DJL 下载 native lib）..."
-              # 用 1x1 PNG 触发 OCR
+              echo "服务启动，触发 OCR 加载模型..."
               echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 -d > /tmp/warmup.png
               curl -s --max-time 60 -X POST \
                 -F "file=@/tmp/warmup.png" \
@@ -99,32 +113,17 @@ jobs:
             fi
           done
 
-          # 杀服务
           kill $WARMUP_PID 2>/dev/null || true
           sleep 2
           kill -9 $WARMUP_PID 2>/dev/null || true
 
           if [ "$SUCCESS" = true ] && [ -d "$HOME/smartjavaai_cache" ]; then
-            echo "✓ 预置 smartjavaai_cache 到 dist/natives/"
+            echo "✓ 预置 native libs"
             mkdir -p dist/natives
             cp -R "$HOME/smartjavaai_cache"/* dist/natives/
             du -sh dist/natives
           else
-            echo "⚠ 未下载到 native lib（dist/natives 留空，用户首次启动需联网）"
-          fi
-
-      - name: Adjust paths for current platform
-        shell: bash
-        run: |
-          # GitHub Actions 上 Mac runner 缓存路径是 ~/smartjavaai_cache
-          # Windows runner 是 %USERPROFILE%/smartjavaai_cache
-          # Linux runner 是 ~/smartjavaai_cache
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            echo "Windows runner - 调整路径"
-            # Windows 上 jlink 输出已经包含 bin/java.exe
-            ls dist/runtime/bin/ | head -5
-          else
-            ls dist/runtime/bin/ | head -5
+            echo "⚠ 未下载到 native lib（用户首次启动需联网）"
           fi
 
       - name: Create start scripts
@@ -223,7 +222,7 @@ jobs:
         run: |
           cat > dist/README.txt << 'EOF'
           ═══════════════════════════════════════════════════════
-            SmartJavaAI OCR & 查重工具  v0.2.0
+            SmartJavaAI OCR & 查重工具  v0.5.0
             平台: ${{ matrix.platform }}
           ═══════════════════════════════════════════════════════
 
@@ -238,7 +237,7 @@ jobs:
             - ${{ matrix.os == 'windows-latest' && 'Windows 10/11 64位' || (matrix.os == 'macos-14' && 'macOS 12+ Apple Silicon (M1/M2/M3)' || 'Linux x86_64') }}
             - 无需预装 Java！JRE 已内置
             - 至少 4GB 内存
-            - 无需联网（native libs 已预置）
+            - 首次启动可能需要联网（DJL 下载 native libs）
 
           💡 功能：
             - 通用 OCR 文字识别（中文/英文/数字）
@@ -251,7 +250,7 @@ jobs:
             runtime/      自定义 JRE（无需安装 Java）
             app/         主程序 jar
             models/      PaddleOCR 模型文件
-            natives/     预置的 native libs（首次启动跳过下载）
+            natives/     预置的 native libs（如有）
             logs/        运行日志
             start.bat    Windows 启动脚本
             start.sh     Mac/Linux 启动脚本
@@ -259,26 +258,23 @@ jobs:
           ❓ 故障排查：
             1. 端口 8080 被占用 → 编辑 start.sh/bat，修改 8080 为其他端口
             2. 模型加载失败 → 检查 models/ 目录是否完整
-            3. 其他问题 → 查看 logs/run.log
+            3. 首次启动慢 → DJL 在下载 native libs（~200MB），需要联网
+            4. 其他问题 → 查看 logs/run.log
           EOF
 
       - name: Clean up build artifacts
         shell: bash
         run: |
-          # 清理临时日志
           rm -rf dist/logs
-          rm -rf smartjavaai-web-demo/target
-          rm -rf common/target ocr/target
           echo "清理完成"
 
       - name: Package as zip
         shell: bash
         run: |
           cd dist
-          zip -qr ../SmartJavaAI-WebDemo-v${{ github.ref_name || '0.2' }}-${{ matrix.platform }}.zip .
+          zip -qr ../SmartJavaAI-WebDemo-${{ github.ref_name || 'latest' }}-${{ matrix.platform }}.zip .
           cd ..
           ls -lh *.zip
-          du -sh dist
 
       - name: Upload zip artifact
         uses: actions/upload-artifact@v4
