@@ -269,11 +269,18 @@ jobs:
           echo "清理完成"
 
       - name: Package as zip
+        # Mac/Linux 用 zip 命令；Windows runner 默认 PowerShell 用 Compress-Archive
         shell: bash
         run: |
-          cd dist
-          zip -qr ../SmartJavaAI-WebDemo-${{ github.ref_name || 'latest' }}-${{ matrix.platform }}.zip .
-          cd ..
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            # Windows PowerShell (default shell) - 用 Compress-Archive
+            powershell -Command "Compress-Archive -Path 'dist/*' -DestinationPath 'SmartJavaAI-WebDemo-${{ github.ref_name || 'latest' }}-${{ matrix.platform }}.zip' -Force"
+          else
+            # Mac / Linux
+            cd dist
+            zip -qr ../SmartJavaAI-WebDemo-${{ github.ref_name || 'latest' }}-${{ matrix.platform }}.zip .
+            cd ..
+          fi
           ls -lh *.zip
 
       - name: Upload zip artifact
