@@ -35,14 +35,10 @@ jobs:
           distribution: temurin
           java-version: '20'
 
-      - name: Build common module
-        run: mvn -B clean install -DskipTests -pl common -am
-
-      - name: Build ocr module
-        run: mvn -B clean install -DskipTests -pl ocr -am
-
       - name: Build web demo
-        run: cd smartjavaai-web-demo && mvn -B clean package -DskipTests
+        # 直接在 web-demo 目录构建，cn.smartjavaai:ocr/common:1.1.2
+        # 从 Maven Central 拉取，无需编译父项目
+        run: cd smartjavaai-web-demo && mvn -B clean package -DskipTests -Dgpg.skip=true
 
       - name: Prepare distribution directory
         shell: bash
